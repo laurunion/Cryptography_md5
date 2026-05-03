@@ -1,30 +1,133 @@
 #include <iostream>
 #include <iomanip>
 #include <sstream>
-#include <CommonCrypto/CommonDigest.h>
+#include <vector>
+#include <cstring>
+#include <cstdint>
 using namespace std;
 
-string md5(string input) {
-    unsigned char digest[CC_MD5_DIGEST_LENGTH];
+// ─── Step 1: Per-round shift amounts ───────────────────────────────────────
+const uint32_t S[64] = {
+    7, 12, 17, 22,  7, 12, 17, 22,  7, 12, 17, 22,  7, 12, 17, 22,  // Round 1
+    5,  9, 14, 20,  5,  9, 14, 20,  5,  9, 14, 20,  5,  9, 14, 20,  // Round 2
+    4, 11, 16, 23,  4, 11, 16, 23,  4, 11, 16, 23,  4, 11, 16, 23,  // Round 3
+    6, 10, 15, 21,  6, 10, 15, 21,  6, 10, 15, 21,  6, 10, 15, 21   // Round 4
+};
 
-    CC_MD5(input.c_str(), input.length(), digest);
+// ─── Step 2: Pre-computed table from sin (K[i] = floor(2^32 * |sin(i+1)|)) ─
+const uint32_t K[64] = {
+    0xd76aa478, 0xe8c7b756, 0x242070db, 0xc1bdceee,
+    0xf57c0faf, 0x4787c62a, 0xa8304613, 0xfd469501,
+    0x698098d8, 0x8b44f7af, 0xffff5bb1, 0x895cd7be,
+    0x6b901122, 0xfd987193, 0xa679438e, 0x49b40821,
+    0xf61e2562, 0xc040b340, 0x265e5a51, 0xe9b6c7aa,
+    0xd62f105d, 0x02441453, 0xd8a1e681, 0xe7d3fbc8,
+    0x21e1cde6, 0xc33707d6, 0xf4d50d87, 0x455a14ed,
+    0xa9e3e905, 0xfcefa3f8, 0x676f02d9, 0x8d2a4c8a,
+    0xfffa3942, 0x8771f681, 0x6d9d6122, 0xfde5380c,
+    0xa4beea44, 0x4bdecfa9, 0xf6bb4b60, 0xbebfbc70,
+    0x289b7ec6, 0xeaa127fa, 0xd4ef3085, 0x04881d05,
+    0xd9d4d039, 0xe6db99e5, 0x1fa27cf8, 0xc4ac5665,
+    0xf4292244, 0x432aff97, 0xab9423a7, 0xfc93a039,
+    0x655b59c3, 0x8f0ccc92, 0xffeff47d, 0x85845dd1,
+    0x6fa87e4f, 0xfe2ce6e0, 0xa3014314, 0x4e0811a1,
+    0xf7537e82, 0xbd3af235, 0x2ad7d2bb, 0xeb86d391
+};
 
-    stringstream ss;
-    for (int i = 0; i < CC_MD5_DIGEST_LENGTH; i++) {
-        ss << hex << setw(2) << setfill('0') << (int)digest[i];
+// ─── Step 3: Left-rotate a 32-bit value ────────────────────────────────────
+uint32_t leftRotate(uint32_t x, uint32_t n) {
+    return (x << n) | (x >> (32 - n));
+}
+
+// ─── Step 4: The four nonlinear functions (one per round) ──────────────────
+//   F mixes B, C, D using AND/OR/NOT (Round 1)
+//   G is a rotated version of F      (Round 2)
+//   H uses XOR (avalanche effect)    (Round 3)
+//   I uses XOR + NOT                 (Round 4)
+uint32_t F(uint32_t b, uint32_t c, uint32_t d) { return (b & c) | (~b & d); }
+uint32_t G(uint32_t b, uint32_t c, uint32_t d) { return (b & d) | (c & ~d); }
+uint32_t H(uint32_t b, uint32_t c, uint32_t d) { return b ^ c ^ d; }
+uint32_t I(uint32_t b, uint32_t c, uint32_t d) { return c ^ (b | ~d); }
+
+// ─── Main MD5 function ──────────────────────────────────────────────────────
+string md5(const string& input) {
+
+    // ── Phase 1: Padding ────────────────────────────────────────────────────
+    // Convert input to bytes, append 0x80, pad with 0s until length ≡ 56 mod 64,
+    // then append original bit-length as a 64-bit little-endian integer.
+    vector<uint8_t> msg(input.begin(), input.end());
+    uint64_t originalBitLen = input.size() * 8;
+
+    msg.push_back(0x80);  // Append the '1' bit (as 0x80 byte)
+    while (msg.size() % 64 != 56)
+        msg.push_back(0x00);
+
+    // Append original length as 8 bytes, little-endian
+    for (int i = 0; i < 8; i++)
+        msg.push_back((originalBitLen >> (8 * i)) & 0xFF);
+
+    // ── Phase 2: Initialize buffers (magic constants from the MD5 spec) ─────
+    uint32_t A = 0x67452301;
+    uint32_t B = 0xefcdab89;
+    uint32_t C = 0x98badcfe;
+    uint32_t D = 0x10325476;
+
+    // ── Phase 3: Process each 512-bit (64-byte) block ───────────────────────
+    for (size_t offset = 0; offset < msg.size(); offset += 64) {
+
+        // Break block into sixteen 32-bit words (little-endian)
+        uint32_t M[16];
+        for (int j = 0; j < 16; j++) {
+            M[j] = (uint32_t)msg[offset + j*4]
+                 | ((uint32_t)msg[offset + j*4 + 1] << 8)
+                 | ((uint32_t)msg[offset + j*4 + 2] << 16)
+                 | ((uint32_t)msg[offset + j*4 + 3] << 24);
+        }
+
+        // Save current buffer state
+        uint32_t a = A, b = B, c = C, d = D;
+
+        // ── 64 operations across 4 rounds ───────────────────────────────────
+        for (int i = 0; i < 64; i++) {
+            uint32_t f, g;
+
+            if      (i < 16) { f = F(b, c, d); g = i; }           // Round 1
+            else if (i < 32) { f = G(b, c, d); g = (5*i + 1) % 16; } // Round 2
+            else if (i < 48) { f = H(b, c, d); g = (3*i + 5) % 16; } // Round 3
+            else             { f = I(b, c, d); g = (7*i) % 16; }     // Round 4
+
+            // Core operation: mix, add message word + constant, rotate, add B
+            uint32_t temp = d;
+            d = c;
+            c = b;
+            b = b + leftRotate(a + f + K[i] + M[g], S[i]);
+            a = temp;
+        }
+
+        // Add this block's result to the running buffer
+        A += a; B += b; C += c; D += d;
     }
 
-    return ss.str();
+    // ── Phase 4: Produce the final 128-bit hash as a hex string ─────────────
+    // Output A, B, C, D in little-endian byte order
+    auto toHex = [](uint32_t val) -> string {
+        stringstream ss;
+        for (int i = 0; i < 4; i++)
+            ss << hex << setw(2) << setfill('0') << ((val >> (8*i)) & 0xFF);
+        return ss.str();
+    };
+
+    return toHex(A) + toHex(B) + toHex(C) + toHex(D);
 }
 
 int main() {
     string text;
-
     cout << "Enter text: ";
     getline(cin, text);
 
-    cout << "MD5 Hash: " << md5(text) << endl;
-    cout << "Hash length: " << md5(text).length() << " characters" << endl;
+    string hash = md5(text);
+    cout << "MD5 Hash:   " << hash << endl;
+    cout << "Hash length: " << hash.length() << " characters (128 bits)" << endl;
 
     return 0;
 }
