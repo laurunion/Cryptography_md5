@@ -50,14 +50,16 @@ uint32_t H(uint32_t b, uint32_t c, uint32_t d) { return b ^ c ^ d; }
 uint32_t I(uint32_t b, uint32_t c, uint32_t d) { return c ^ (b | ~d); }
 
 // ─── Main MD5 function ──────────────────────────────────────────────────────
-string md5(const string& input) {
+string md5(const string& input) { //512 bit processing block(64 bytes)
 
     vector<uint8_t> msg;
 
+    // Convert input string into raw bytes (ASCII values)
     for (char ch : input) {
         msg.push_back(static_cast<uint8_t>(ch));
     }
 
+     // Store original length in bits (needed later for MD5 padding rules)
     uint64_t originalBitLen = input.size() * 8;
 
     cout << "\n--- Padding Demo ---" << endl;
@@ -66,6 +68,7 @@ string md5(const string& input) {
     for (uint8_t b : msg) cout << (int)b << " ";
     cout << endl;
 
+     // Append a single '1' bit (represented as 0x80 = 10000000)
     msg.push_back(0x80);
 
     cout << "2. Add 0x80 padding marker: ";
@@ -73,7 +76,8 @@ string md5(const string& input) {
     cout << endl;
 
     int zeroCount = 0;
-
+    // Add 0 bytes until message length ≡ 56 mod 64
+    // (so final 8 bytes can store original length → total = multiple of 64)
     while (msg.size() % 64 != 56) {
         msg.push_back(0x00);
         zeroCount++;
@@ -91,14 +95,17 @@ string md5(const string& input) {
     cout << "4. Append original length: "
          << input.size() << " bytes = " << originalBitLen << " bits" << endl;
 
+         
     cout << "   Length bytes added: ";
+
+    // Append original length as 8 bytes (little-endian order)
     for (int i = 0; i < 8; i++) {
         uint8_t lengthByte = (originalBitLen >> (8 * i)) & 0xFF;
         msg.push_back(lengthByte);
         cout << (int)lengthByte << " ";
     }
     cout << endl;
-
+    //final padded message
     cout << "5. Final padded block:" << endl;
 
     cout << "   Start: ";
@@ -116,59 +123,115 @@ string md5(const string& input) {
     cout << "Final padded size: " << msg.size()
          << " bytes = " << msg.size() * 8 << " bits\n" << endl;
 
-    // ── Phase 2: fixed constants ─────
+    // Phase 2: Initialize MD5 state
+    // These are fixed starting values from the MD5 algorithm.
+    // They act like the starting "memory" that gets updated as the message is processed.
     uint32_t A = 0x67452301;
     uint32_t B = 0xefcdab89;
     uint32_t C = 0x98badcfe;
     uint32_t D = 0x10325476;
 
-    // ── Phase 3: Process each 512-bit (64-byte) block ───────────────────────
+    cout << "\n--- Processing Demo ---" << endl;
+    cout << "MD5 now processes the padded message in 64-byte blocks." << endl;
+    cout << "Each block is split into 16 words of 32 bits each." << endl;
+    cout << "Then MD5 runs 64 mixing steps using F, G, H, and I." << endl;
+
+// Go through the padded message one 64-byte block at a time.
+// 64 bytes = 512 bits, which is the block size MD5 uses.
     for (size_t offset = 0; offset < msg.size(); offset += 64) {
 
-        // Break block into sixteen 32-bit words (little-endian)
+        // This array stores the current 64-byte block as 16 smaller 32-bit words.
         uint32_t M[16];
+
+        // Combine every 4 bytes into one 32-bit word.
+    // MD5 reads these 4-byte groups in little-endian order.
         for (int j = 0; j < 16; j++) {
             M[j] = (uint32_t)msg[offset + j*4]
-                 | ((uint32_t)msg[offset + j*4 + 1] << 8)
-                 | ((uint32_t)msg[offset + j*4 + 2] << 16)
-                 | ((uint32_t)msg[offset + j*4 + 3] << 24);
+                | ((uint32_t)msg[offset + j*4 + 1] << 8)
+                | ((uint32_t)msg[offset + j*4 + 2] << 16)
+                | ((uint32_t)msg[offset + j*4 + 3] << 24);
         }
 
-        // Save current buffer state
+        cout << "\nBlock created: 64 bytes → 16 words" << endl;
+        cout << "Example: M[0] = " << M[0] << endl;
+
+        // Copy the current hash state into working variables.
+    // These get changed during the 64 mixing steps.
         uint32_t a = A, b = B, c = C, d = D;
 
-        // ── 64 operations across 4 rounds ───────────────────────────────────
+        // Run 64 total operations.
+    // These are split into 4 rounds of 16 operations each.
         for (int i = 0; i < 64; i++) {
             uint32_t f, g;
 
-            if      (i < 16) { f = F(b, c, d); g = i; }           // Round 1
-            else if (i < 32) { f = G(b, c, d); g = (5*i + 1) % 16; } // Round 2
-            else if (i < 48) { f = H(b, c, d); g = (3*i + 5) % 16; } // Round 3
-            else             { f = I(b, c, d); g = (7*i) % 16; }     // Round 4
+                    // Round 1: use function F and process message words in normal order.
+        if (i < 16) { 
+            f = F(b, c, d); 
+            g = i; 
+        }
 
-            // Core operation: mix, add message word + constant, rotate, add B
+        // Round 2: use function G and choose message words in a new order.
+        else if (i < 32) { 
+            f = G(b, c, d); 
+            g = (5*i + 1) % 16; 
+        }
+
+        // Round 3: use function H and another message-word order.
+        else if (i < 48) { 
+            f = H(b, c, d); 
+            g = (3*i + 5) % 16; 
+        }
+
+        // Round 4: use function I and the final message-word order.
+        else { 
+            f = I(b, c, d); 
+            g = (7*i) % 16; 
+        }
+
+                // Save d before rotating the working variables.
             uint32_t temp = d;
+
+              // Rotate the working variables.
+        // Each step shifts the roles of a, b, c, and d.
             d = c;
             c = b;
+             // Main MD5 mixing step:
+        // combine old state + nonlinear function + constant + message word,
+        // rotate the bits, then add the result into b.
             b = b + leftRotate(a + f + K[i] + M[g], S[i]);
+                    // Old d becomes the new a.
             a = temp;
         }
 
-        // Add this block's result to the running buffer
-        A += a; B += b; C += c; D += d;
+        // Add the result of this block back into the main hash state.
+    // This makes each block affect the final hash.
+        A += a;
+        B += b;
+        C += c;
+        D += d;
     }
 
-    // ── Phase 4: Produce the final 128-bit hash as a hex string ─────────────
-    // Output A, B, C, D in little-endian byte order
+    cout << "After processing, A, B, C, and D hold the final 128-bit state." << endl;
+    // ── Phase 4: Convert final state into hash ───────────────────
+    // Each value is 32 bits.
+    // A + B + C + D = 128 bits total.
+    // Hex prints 4 bits per character, so 128 bits = 32 hex characters.
     auto toHex = [](uint32_t val) -> string {
         stringstream ss;
-        for (int i = 0; i < 4; i++)
-            ss << hex << setw(2) << setfill('0') << ((val >> (8*i)) & 0xFF);
+// Convert each 32-bit value into 4 hex bytes.
+    // MD5 outputs these bytes in little-endian order.
+        for (int i = 0; i < 4; i++) {
+            ss << hex << setw(2) << setfill('0')
+            << ((val >> (8*i)) & 0xFF);
+        }
+
         return ss.str();
     };
 
-    return toHex(A) + toHex(B) + toHex(C) + toHex(D);
+// Combine A, B, C, and D into the final 32-character MD5 hash.
+return toHex(A) + toHex(B) + toHex(C) + toHex(D);
 }
+
 
 int main() {
     string text;
