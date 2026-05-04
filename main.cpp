@@ -52,21 +52,71 @@ uint32_t I(uint32_t b, uint32_t c, uint32_t d) { return c ^ (b | ~d); }
 // ─── Main MD5 function ──────────────────────────────────────────────────────
 string md5(const string& input) {
 
-    // ── Phase 1: Padding ────────────────────────────────────────────────────
-    // Convert input to bytes, append 0x80, pad with 0s until length ≡ 56 mod 64,
-    // then append original bit-length as a 64-bit little-endian integer.
-    vector<uint8_t> msg(input.begin(), input.end());
+    vector<uint8_t> msg;
+
+    for (char ch : input) {
+        msg.push_back(static_cast<uint8_t>(ch));
+    }
+
     uint64_t originalBitLen = input.size() * 8;
 
-    msg.push_back(0x80);  // Append the '1' bit (as 0x80 byte)
-    while (msg.size() % 64 != 56)
+    cout << "\n--- Padding Demo ---" << endl;
+
+    cout << "1. Input as ASCII bytes: ";
+    for (uint8_t b : msg) cout << (int)b << " ";
+    cout << endl;
+
+    msg.push_back(0x80);
+
+    cout << "2. Add 0x80 padding marker: ";
+    for (uint8_t b : msg) cout << (int)b << " ";
+    cout << endl;
+
+    int zeroCount = 0;
+
+    while (msg.size() % 64 != 56) {
         msg.push_back(0x00);
+        zeroCount++;
+    }
 
-    // Append original length as 8 bytes, little-endian
-    for (int i = 0; i < 8; i++)
-        msg.push_back((originalBitLen >> (8 * i)) & 0xFF);
+    cout << "3. Add " << zeroCount
+         << " zeros so the message reaches 56 bytes" << endl;
 
-    // ── Phase 2: Initialize buffers (magic constants from the MD5 spec) ─────
+    cout << "   Start of message: ";
+    for (int i = 0; i < 10 && i < msg.size(); i++) {
+        cout << (int)msg[i] << " ";
+    }
+    cout << "... total = " << msg.size() << " bytes" << endl;
+
+    cout << "4. Append original length: "
+         << input.size() << " bytes = " << originalBitLen << " bits" << endl;
+
+    cout << "   Length bytes added: ";
+    for (int i = 0; i < 8; i++) {
+        uint8_t lengthByte = (originalBitLen >> (8 * i)) & 0xFF;
+        msg.push_back(lengthByte);
+        cout << (int)lengthByte << " ";
+    }
+    cout << endl;
+
+    cout << "5. Final padded block:" << endl;
+
+    cout << "   Start: ";
+    for (int i = 0; i < 10 && i < msg.size(); i++) {
+        cout << (int)msg[i] << " ";
+    }
+
+    cout << "... End: ";
+    for (int i = msg.size() - 8; i < msg.size(); i++) {
+        cout << (int)msg[i] << " ";
+    }
+
+    cout << endl;
+
+    cout << "Final padded size: " << msg.size()
+         << " bytes = " << msg.size() * 8 << " bits\n" << endl;
+
+    // ── Phase 2: fixed constants ─────
     uint32_t A = 0x67452301;
     uint32_t B = 0xefcdab89;
     uint32_t C = 0x98badcfe;
